@@ -64,12 +64,15 @@ class SmartCradleSystem:
         
         print("✅ System Operational. Listening for cries...")
         
+        # Default sleep time (start quick to verify system is working)
+        next_sleep_interval = 5 
+        
         try:
             while self.running:
-                # Polling interval (don't check too fast)
-                time.sleep(60) 
+                # Sleep dynamically based on the previous state
+                time.sleep(next_sleep_interval) 
                 
-                # Get Audio
+                # Get Audio from the buffer
                 segment = self.audio_buffer.get_audio_segment()
                 if len(segment) < SEGMENT_SIZE:
                     continue
@@ -78,40 +81,39 @@ class SmartCradleSystem:
                 emotion, confidence = self.cry_classifier.predict(segment)
                 posture = self._detect_posture()
                 
-                # Only log/act if it's not silence or if confidence is high enough
-                if emotion != "silence":
-                    print(f"🔍 Analysis: {emotion} ({confidence:.2f}) | Posture: {posture}")
+                # 2. Send Data to Flutter App
+                self.ws_server.broadcast_data({
+                    "emotion": emotion,
+                    "confidence": confidence,
+                    "posture": posture
+                })
 
-                    # 2. Send Data to Flutter App
-                    self.ws_server.broadcast_data({
-                        "emotion": emotion,
-                        "confidence": confidence,
-                        "posture": posture
-                    })
-
-                    # 3. RL Decision & Action
-                    # Decide action based on emotion
+                # 3. Logic: Silent vs Crying
+                if emotion == "silence":
+                    print(f"😴 Baby is silent. Checking again in 60s...")
+                    next_sleep_interval = 60  # Long sleep to save resources
+                
+                else:
+                    # Baby is crying!
+                    print(f"🚨 Analysis: {emotion} ({confidence:.2f}) | Posture: {posture}")
+                    print(f"⚡ Taking action for: {emotion}")
+                    
+                    # Decide action (RL Agent)
                     action = self.agent.choose_action(emotion)
-                    print(f"🤖 Agent Chose: {action}")
+                    print(f"🤖 Agent Decided: {action}")
 
                     if action == "voice":
                         self.soother.soothe(emotion)
                     elif action == "music":
                         self.music_player.play_music(emotion)
                     
-                    # 4. Update Agent
-                    # Simple reward logic: 1 if we did something (placeholder)
-                    # Real reward should be based on if the baby STOPS crying in the next loop
+                    # Update Agent Memory
                     reward = 1 
                     self.agent.update(emotion, action, reward, emotion)
                     self.agent.save(RL_TABLE_PATH)
                     
-                    # Wait after action to let it have effect (so we don't spam speech)
-                    print("⏳ Waiting for soothing effect...")
-                    time.sleep(60) 
-                    
-                    # Clear buffer effectively (by waiting) or manual clear if needed
-                    # For deque, old data slides out, so waiting is usually enough.
+                    print("⏳ Soothing applied. Checking effect in 10s...")
+                    next_sleep_interval = 10  # Short sleep to check if it worked
 
         except KeyboardInterrupt:
             self.shutdown()

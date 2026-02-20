@@ -3,7 +3,6 @@ import random
 import sounddevice as sd
 from config import *
 
-# Component Imports
 from audio.audio_utils import AudioBuffer
 from cry_model.cry_classifier import CryClassifier
 from rl_agent.q_learning_agent import QLearningAgent
@@ -13,9 +12,8 @@ from websocket_server.server import WebSocketServer
 
 class SmartCradleSystem:
     def __init__(self):
-        print("🚀 Initializing Smart Cradle System...")
+        print("🚀 Initializing Smart Soothing System...")
         
-        # 1. Initialize Components
         self.audio_buffer = AudioBuffer(SEGMENT_SIZE)
         
         print("⏳ Starting WebSocket Server...")
@@ -24,11 +22,11 @@ class SmartCradleSystem:
         print("⏳ Loading Cry Classifier...")
         self.cry_classifier = CryClassifier(CRY_MODEL_PATH, CATEGORIES)
         
-        print("⏳ Loading RL Agent...")
+        print("⏳ Loading Main RL Agent (Voice vs Music)...")
         self.agent = QLearningAgent(CATEGORIES, ["voice", "music"])
         self.agent.load(RL_TABLE_PATH)
         
-        print("⏳ Initializing Parent Soother (This includes TTS/LLM loading)...")
+        print("⏳ Initializing Parent Soother...")
         self.soother = ParentSoother(
             llm_model=LLM_MODEL_NAME,
             tts_model=TTS_MODEL_NAME,
@@ -43,7 +41,6 @@ class SmartCradleSystem:
         self.running = False
 
     def _detect_posture(self):
-        """Simulated sensor data."""
         return random.choice(["safe", "risky"])
 
     def start_audio_stream(self):
@@ -57,63 +54,73 @@ class SmartCradleSystem:
         print("🎙️ Audio Stream Started")
 
     def run(self):
-        """Main execution loop."""
         self.ws_server.start()
         self.start_audio_stream()
         self.running = True
         
         print("✅ System Operational. Listening for cries...")
         
-        # Default sleep time (start quick to verify system is working)
-        next_sleep_interval = 5 
-        
         try:
             while self.running:
-                # Sleep dynamically based on the previous state
-                time.sleep(next_sleep_interval) 
+                time.sleep(1) 
                 
-                # Get Audio from the buffer
                 segment = self.audio_buffer.get_audio_segment()
                 if len(segment) < SEGMENT_SIZE:
                     continue
 
-                # 1. Predict Emotion
-                emotion, confidence = self.cry_classifier.predict(segment)
+                # 1. Predict Initial Emotion (Current State)
+                current_emotion, confidence = self.cry_classifier.predict(segment)
                 posture = self._detect_posture()
                 
-                # 2. Send Data to Flutter App
                 self.ws_server.broadcast_data({
-                    "emotion": emotion,
+                    "emotion": current_emotion,
                     "confidence": confidence,
                     "posture": posture
                 })
 
-                # 3. Logic: Silent vs Crying
-                if emotion == "silence":
+                if current_emotion == "silence":
                     print(f"😴 Baby is silent. Checking again in 60s...")
-                    next_sleep_interval = 60  # Long sleep to save resources
+                    time.sleep(60)
                 
                 else:
-                    # Baby is crying!
-                    print(f"🚨 Analysis: {emotion} ({confidence:.2f}) | Posture: {posture}")
-                    print(f"⚡ Taking action for: {emotion}")
+                    print(f"🚨 Analysis: {current_emotion} ({confidence:.2f})")
                     
-                    # Decide action (RL Agent)
-                    action = self.agent.choose_action(emotion)
-                    print(f"🤖 Agent Decided: {action}")
+                    # 2. Decide main action (Voice vs Music)
+                    action = self.agent.choose_action(current_emotion)
+                    print(f"🤖 Main Agent Decided: {action}")
 
+                    chosen_music_category = None
                     if action == "voice":
-                        self.soother.soothe(emotion)
+                        self.soother.soothe(current_emotion)
                     elif action == "music":
-                        self.music_player.play_music(emotion)
+                        chosen_music_category = self.music_player.play_music(current_emotion)
                     
-                    # Update Agent Memory
-                    reward = 1 
-                    self.agent.update(emotion, action, reward, emotion)
+                    # 3. Wait and observe the effect
+                    print("⏳ Soothing applied. Waiting 10s to observe effect...")
+                    time.sleep(10)
+                    
+                    # 4. Measure the Next State
+                    next_segment = self.audio_buffer.get_audio_segment()
+                    next_emotion, next_conf = self.cry_classifier.predict(next_segment)
+                    
+                    # 5. Calculate Reward
+                    if next_emotion == "silence" or next_emotion == "laugh":
+                        reward = 10  # Highly successful
+                    elif next_emotion == current_emotion:
+                        reward = -1  # No improvement, still crying the same way
+                    else:
+                        reward = 0   # Changed cry type, neutral result
+                    
+                    # 6. Update Agents
+                    # Update High-Level Agent
+                    self.agent.update(current_emotion, action, reward, next_emotion)
                     self.agent.save(RL_TABLE_PATH)
                     
-                    print("⏳ Soothing applied. Checking effect in 10s...")
-                    next_sleep_interval = 10  # Short sleep to check if it worked
+                    # Update Low-Level Music Agent (if music was used)
+                    if action == "music" and chosen_music_category:
+                        self.music_player.update_agent(current_emotion, chosen_music_category, reward, next_emotion)
+                    
+                    print(f"📈 RL Updated | State: {current_emotion} -> Next: {next_emotion} | Reward: {reward}")
 
         except KeyboardInterrupt:
             self.shutdown()

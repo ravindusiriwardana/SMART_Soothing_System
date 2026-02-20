@@ -2,7 +2,8 @@ import os
 import random
 import time
 import pygame
-from config import MUSIC_BASE_DIR
+from config import MUSIC_BASE_DIR, MUSIC_CATEGORIES, MUSIC_RL_TABLE_PATH, CATEGORIES
+from rl_agent.q_learning_agent import QLearningAgent
 
 class MusicPlayer:
     def __init__(self):
@@ -12,48 +13,36 @@ class MusicPlayer:
         
         self.base_dir = MUSIC_BASE_DIR
         
-        # --- UPDATED MAPPING TO MATCH YOUR FOLDERS EXACTLY ---
-        self.emotion_map = {
-            "belly pain": "loud_high_pitched",
-            "burping":    "rhythmic_rising_pitch",
-            "discomfort": "medium_pitch_whiny",
-            "hungry":     "rhythmic_rising_pitch",
-            "laugh":      "playful_upbeat",
-            "lonely":     "warm_soft_comforting",
-            "noise":      "noise",                 # CHANGED: "neutral_noise_blocker" -> "noise"
-            "scared":     "trembling_pitch",
-            "silence":    "silence",               # CHANGED: "baseline_state" -> "silence"
-            "tired":      "warm_soft_comforting"   # CHANGED: "low_energy_whining" -> "warm_soft_comforting" (Fallback since folder is missing)
-        }
-
-    def _get_category_path(self, emotion):
-        """Helper to resolve the folder path for a given emotion."""
-        # Default to 'baseline_state' if the emotion is unknown
-        category = self.emotion_map.get(emotion.lower(), "baseline_state")
-        return os.path.join(self.base_dir, category)
+        # Initialize the RL Agent specifically for Music Selection
+        # States = Baby's Emotions | Actions = Music Folders/Categories
+        self.agent = QLearningAgent(states=CATEGORIES, actions=MUSIC_CATEGORIES)
+        self.agent.load(MUSIC_RL_TABLE_PATH)
 
     def play_music(self, emotion):
-        """Plays a random song associated with the detected emotion."""
+        """Plays a song based on the RL agent's dynamic selection."""
         print(f"🎵 Music Player received emotion: {emotion}")
         
-        folder_path = self._get_category_path(emotion)
+        # RL Agent decides the music category (Action) based on emotion (State)
+        chosen_category = self.agent.choose_action(emotion)
+        print(f"🧠 Music RL Agent selected category: {chosen_category}")
+        
+        folder_path = os.path.join(self.base_dir, chosen_category)
         
         if not os.path.exists(folder_path):
             print(f"⚠️ Music category folder not found: {folder_path}")
-            return
+            return None
 
-        # List valid audio files
         try:
             songs = [f for f in os.listdir(folder_path) if f.lower().endswith(('.mp3', '.wav'))]
         except Exception as e:
             print(f"⚠️ Error accessing music folder: {e}")
-            return
+            return None
 
         if not songs:
             print(f"⚠️ No songs found in {folder_path}")
-            return
+            return None
 
-        # Pick a random song
+        # Pick a random song from the chosen category
         song_file = random.choice(songs)
         song_path = os.path.join(folder_path, song_file)
         
@@ -62,14 +51,21 @@ class MusicPlayer:
             pygame.mixer.music.load(song_path)
             pygame.mixer.music.play()
             
-            # Non-blocking check so the loop doesn't freeze entirely, 
-            # but we wait a bit to prevent rapid-fire skipping
+            # Non-blocking wait
             while pygame.mixer.music.get_busy():
                 time.sleep(1)
                 
         except Exception as e:
             print(f"❌ Error playing music: {e}")
+            
+        # Return the chosen category so the system_controller can grade its success
+        return chosen_category
 
     def stop(self):
         """Stops any currently playing music."""
         pygame.mixer.music.stop()
+        
+    def update_agent(self, state, action, reward, next_state):
+        """Updates the Q-table for music preferences based on the reward."""
+        self.agent.update(state, action, reward, next_state)
+        self.agent.save(MUSIC_RL_TABLE_PATH)

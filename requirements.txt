@@ -89,7 +89,7 @@ ollama==0.6.1
 opt_einsum==3.4.0
 optree==0.19.0
 orjson==3.11.7
-packaging @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_packaging_1769093650/work
+packaging==24.0
 pillow==12.1.1
 platformdirs==4.9.2
 pooch==1.9.0

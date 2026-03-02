@@ -1,6 +1,7 @@
 import time
 import random
 import sounddevice as sd
+import pygame  # Added to handle music stopping
 from config import *
 
 from audio.audio_utils import AudioBuffer
@@ -60,6 +61,9 @@ class SmartCradleSystem:
         
         print("✅ System Operational. Listening for cries...")
         
+        # Define states that are considered "Calm/Safe"
+        CALM_STATES = ["silence", "laugh", "noise"]
+
         try:
             while self.running:
                 time.sleep(1) 
@@ -72,18 +76,29 @@ class SmartCradleSystem:
                 current_emotion, confidence = self.cry_classifier.predict(segment)
                 posture = self._detect_posture()
                 
+                # Broadcast data to WebSocket
                 self.ws_server.broadcast_data({
                     "emotion": current_emotion,
                     "confidence": confidence,
-                    "posture": posture
+                    "posture": posture,
+                    "is_calm": current_emotion in CALM_STATES
                 })
 
-                if current_emotion == "silence":
-                    print(f"😴 Baby is silent. Checking again in 60s...")
-                    time.sleep(60)
+                # --- THE FILTER GATE ---
+                # If baby is in a calm state, display status and skip soothing
+                if current_emotion in CALM_STATES:
+                    print(f"✅ Baby is Calm ({current_emotion}). Monitoring...")
+                    
+                    # Optional: Stop music if it was playing from a previous cry
+                    if pygame.mixer.get_init() and pygame.mixer.music.get_busy():
+                        self.music_player.stop()
+                        
+                    time.sleep(15) # Wait before next check
+                    continue # Jump back to start of while loop
                 
+                # --- ACTION LOGIC (Only runs for distress states) ---
                 else:
-                    print(f"🚨 Analysis: {current_emotion} ({confidence:.2f})")
+                    print(f"🚨 Distress detected: {current_emotion} ({confidence:.2f})")
                     
                     # 2. Decide main action (Voice vs Music)
                     action = self.agent.choose_action(current_emotion)
@@ -103,16 +118,15 @@ class SmartCradleSystem:
                     next_segment = self.audio_buffer.get_audio_segment()
                     next_emotion, next_conf = self.cry_classifier.predict(next_segment)
                     
-                    # 5. Calculate Reward
-                    if next_emotion == "silence" or next_emotion == "laugh":
+                    # 5. Calculate Reward (Modified as requested)
+                    if next_emotion in ["silence", "laugh", "noise"]:
                         reward = 10  # Highly successful
-                    elif next_emotion == current_emotion:
-                        reward = -1  # No improvement, still crying the same way
+                    elif next_emotion in ["discomfort", "tired", "lonely", "hungry", "belly pain", "scared", "burping"]:
+                        reward = -1  # Still in distress
                     else:
-                        reward = 0   # Changed cry type, neutral result
+                        reward = 0   # Changed state but not silent
                     
                     # 6. Update Agents
-                    # Update High-Level Agent
                     self.agent.update(current_emotion, action, reward, next_emotion)
                     self.agent.save(RL_TABLE_PATH)
                     

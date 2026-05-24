@@ -19,8 +19,11 @@ RL_TABLE_PATH = os.path.join(BASE_DIR, "data", "q_table", "q_table.pkl")
 MUSIC_RL_TABLE_PATH = os.path.join(BASE_DIR, "data", "q_table", "music_q_table.pkl")
 
 # Server Settings
+# The Dart client uses socket_io_client and was connecting to port 5001 in
+# the browser logs.  Keep the default in sync to avoid confusion.
 WS_HOST = "0.0.0.0"
-WS_PORT = 8765
+WS_PORT = 5001
+
 
 # AI Models
 TTS_MODEL_NAME = "tts_models/multilingual/multi-dataset/your_tts"

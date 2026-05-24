@@ -9,7 +9,9 @@ from cry_model.cry_classifier import CryClassifier
 from rl_agent.q_learning_agent import QLearningAgent
 from tts_soother.parent_soother import ParentSoother
 from music.music_player import MusicPlayer
-from websocket_server.server import WebSocketServer
+# previous WebSocketServer implementation has been replaced by a Socket.IO server
+# so that the Flutter/Dart client can continue using socket_io_client.
+from websocket_server.socketio_server import SocketIOServer
 
 class SmartCradleSystem:
     def __init__(self):
@@ -17,8 +19,9 @@ class SmartCradleSystem:
         
         self.audio_buffer = AudioBuffer(SEGMENT_SIZE)
         
-        print("⏳ Starting WebSocket Server...")
-        self.ws_server = WebSocketServer(WS_HOST, WS_PORT)
+        print("⏳ Starting Socket.IO Server...")
+        # the Dart client expects a socket.io endpoint (port 5001 in the logs)
+        self.ws_server = SocketIOServer(WS_HOST, WS_PORT)
         
         print("⏳ Loading Cry Classifier...")
         self.cry_classifier = CryClassifier(CRY_MODEL_PATH, CATEGORIES)
@@ -146,3 +149,4 @@ class SmartCradleSystem:
             self.stream.stop()
             self.stream.close()
         print("👋 Goodbye.")
+
